@@ -233,6 +233,31 @@
   .signed-in-avatar{width:40px; height:40px; border-radius:50%; background:var(--green-dim); color:var(--green); display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-weight:700; font-size:16px; margin-bottom:12px;}
   .live-seconds{display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--green); margin-left:6px; animation:pulse 1s infinite;}
   @keyframes pulse{0%,100%{opacity:1;} 50%{opacity:.3;}}
+
+  /* Session Clock — IST/NY live clocks + flatten countdown */
+  .sc-grid{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;}
+  .sc-tz{background:var(--panel-2); border:1px solid var(--border); border-radius:8px; padding:14px 16px;}
+  .sc-tz-label{font-family:var(--font-mono); font-size:10px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.07em; margin-bottom:6px;}
+  .sc-tz-time{font-family:var(--font-mono); font-size:22px; font-weight:600; font-variant-numeric:tabular-nums;}
+  .sc-tz-date{font-family:var(--font-mono); font-size:11px; color:var(--text-dim); margin-top:2px;}
+  .sc-countdown{border-radius:10px; padding:18px 20px; border:1px solid; display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;}
+  .sc-countdown.green{background:var(--green-dim); border-color:#234a3c;}
+  .sc-countdown.amber{background:var(--amber-dim); border-color:#4a3a1e;}
+  .sc-countdown.red{background:var(--red-dim); border-color:#4a2427; animation:redPulse 1.4s infinite;}
+  @keyframes redPulse{0%,100%{box-shadow:0 0 0 rgba(229,72,77,0);} 50%{box-shadow:0 0 14px rgba(229,72,77,.35);}}
+  .sc-countdown-label{font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; margin-bottom:6px;}
+  .sc-countdown.green .sc-countdown-label{color:var(--green);} .sc-countdown.amber .sc-countdown-label{color:var(--amber);} .sc-countdown.red .sc-countdown-label{color:var(--red);}
+  .sc-countdown-value{font-family:var(--font-mono); font-size:26px; font-weight:700; font-variant-numeric:tabular-nums;}
+  .sc-countdown.green .sc-countdown-value{color:var(--green);} .sc-countdown.amber .sc-countdown-value{color:var(--amber);} .sc-countdown.red .sc-countdown-value{color:var(--red);}
+  .sc-deadline-edit{display:flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:11px; color:var(--text-dim);}
+  .sc-deadline-edit input{width:60px; padding:6px 8px; font-size:12px;}
+  .sc-compact{display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;}
+  .sc-compact-clocks{display:flex; gap:18px; font-family:var(--font-mono); font-size:12px; color:var(--text-dim);}
+  .sc-compact-clocks b{color:var(--text); font-variant-numeric:tabular-nums;}
+  .sc-compact-count{font-family:var(--font-mono); font-weight:700; font-size:15px; padding:6px 14px; border-radius:20px; border:1px solid;}
+  .sc-compact-count.green{color:var(--green); background:var(--green-dim); border-color:#234a3c;}
+  .sc-compact-count.amber{color:var(--amber); background:var(--amber-dim); border-color:#4a3a1e;}
+  .sc-compact-count.red{color:var(--red); background:var(--red-dim); border-color:#4a2427;}
 </style>
 </head>
 <body>
@@ -320,6 +345,8 @@
         <div class="panel-head"><div class="panel-title"><span class="n">§3</span>Profitable Days</div><div class="panel-note" id="days-note"></div></div>
         <div class="dot-row" id="dot-row"></div>
       </div>
+
+      <div class="panel" id="session-clock-dash"></div>
     </div>
 
     <!-- CALCULATOR -->
@@ -329,6 +356,7 @@
         <select class="acct-switch" id="acct-switch-calc"></select>
       </div>
       <div class="daily-banner" id="daily-banner"></div>
+      <div class="panel" id="session-clock-calc" style="padding:16px 20px;"></div>
       <div class="grid2" style="align-items:start;">
         <div class="panel">
           <div class="panel-head"><div class="panel-title"><span class="n">§1</span>Trade Parameters</div></div>
@@ -590,6 +618,7 @@
   let state = {
     accounts:[ defaultAccount('acc1','Plan A — Lucid','lucid','25K'), defaultAccount('acc2','Plan B — MFFU','mffu','25K') ],
     activeAccountId:'acc1',
+    flattenDeadline:{ hour:16, minute:55 }, // ET — default 4:55 PM, editable in the Session Clock widget
   };
   let trades = [];
   let deletedTrades = [];
@@ -645,6 +674,7 @@
       if(b) deletedTrades = JSON.parse(b);
     }catch(e){ /* no saved bin yet */ }
     state.accounts.forEach(a=>{ if(typeof a.alias === 'undefined') a.alias = ''; });
+    if(!state.flattenDeadline) state.flattenDeadline = { hour:16, minute:55 };
   }
   /* ============ CLOUD AUTH & SYNC ============ */
 
@@ -690,6 +720,7 @@
         if(data.trades) trades = data.trades;
         if(data.deleted_trades) deletedTrades = data.deleted_trades;
         state.accounts.forEach(a=>{ if(typeof a.alias === 'undefined') a.alias = ''; });
+    if(!state.flattenDeadline) state.flattenDeadline = { hour:16, minute:55 };
       } else {
         pushCloud();
       }
@@ -1382,12 +1413,103 @@
   let jrTimeAuto = true;
   function startLiveTimeClock(){
     const input = $('#jr-time');
-    if(!input) return;
-    input.addEventListener('focus', ()=>{ jrTimeAuto = false; });
-    input.addEventListener('change', ()=>{ jrTimeAuto = false; });
-    setInterval(()=>{
-      if(jrTimeAuto && input){ input.value = new Date().toTimeString().slice(0,8); }
-    }, 1000);
+    if(input){
+      input.addEventListener('focus', ()=>{ jrTimeAuto = false; });
+      input.addEventListener('change', ()=>{ jrTimeAuto = false; });
+      setInterval(()=>{
+        if(jrTimeAuto && input){ input.value = new Date().toTimeString().slice(0,8); }
+      }, 1000);
+    }
+    sessionClockTick();
+    setInterval(sessionClockTick, 1000);
+  }
+
+  /* ============ SESSION CLOCK (IST / NY + no-overnight flatten countdown) ============ */
+  /* CME/CBOT/COMEX futures run nearly 24h with a daily break starting ~5:00 PM ET.
+     Prop-firm day-trading rules require flat before that break — this widget counts down to it. */
+
+  function tzParts(date, timeZone){
+    const dtf = new Intl.DateTimeFormat('en-US', { timeZone, hour12:false,
+      year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit', weekday:'short' });
+    const parts = dtf.formatToParts(date).reduce((acc,p)=>{ acc[p.type]=p.value; return acc; }, {});
+    return parts; // strings, hour may be "24" at midnight in some locales — normalize below
+  }
+  function tzOffsetMinutes(date, timeZone){
+    const p = tzParts(date, timeZone);
+    let hour = parseInt(p.hour); if(hour === 24) hour = 0;
+    const asUTC = Date.UTC(p.year, p.month-1, p.day, hour, p.minute, p.second);
+    return (asUTC - date.getTime()) / 60000;
+  }
+  function nextDeadlineUTC(hour, minute, timeZone){
+    const now = new Date();
+    const p = tzParts(now, timeZone);
+    const offset = tzOffsetMinutes(now, timeZone);
+    let candidate = Date.UTC(p.year, p.month-1, p.day, hour, minute, 0) - offset*60000;
+    if(candidate <= now.getTime()) candidate += 24*60*60*1000;
+    return candidate;
+  }
+  function formatClock(date, timeZone){
+    const p = tzParts(date, timeZone);
+    let hour = parseInt(p.hour); if(hour === 24) hour = 0;
+    const hh = String(hour).padStart(2,'0');
+    return { time: `${hh}:${p.minute}:${p.second}`, date: `${p.weekday}, ${p.day}/${p.month}/${p.year}` };
+  }
+
+  function sessionClockTick(){
+    const now = new Date();
+    const ist = formatClock(now, 'Asia/Kolkata');
+    const ny = formatClock(now, 'America/New_York');
+    const dl = state.flattenDeadline || { hour:16, minute:55 };
+    const targetMs = nextDeadlineUTC(dl.hour, dl.minute, 'America/New_York');
+    let remainMs = targetMs - now.getTime();
+    const isTomorrow = remainMs > 12*60*60*1000 && new Date(targetMs).toDateString() !== now.toDateString();
+    const h = Math.floor(remainMs/3600000), m = Math.floor((remainMs%3600000)/60000), s = Math.floor((remainMs%60000)/1000);
+    const countStr = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    let level = 'green';
+    if(h < 1) level = 'red'; else if(h < 4) level = 'amber';
+    const label = isTomorrow ? "Time Left to Flatten — Tomorrow's Session" : "Time Left to Flatten — No Overnight Holds";
+    const dlStr12 = ((dl.hour%12)||12) + ':' + String(dl.minute).padStart(2,'0') + (dl.hour>=12?' PM':' AM') + ' ET';
+
+    // Full widget (Dashboard)
+    const full = $('#session-clock-dash');
+    if(full){
+      full.innerHTML = `
+        <div class="panel-head"><div class="panel-title"><span class="n">§4</span>Session Clock</div><div class="panel-note">No-overnight discipline — CME day session</div></div>
+        <div class="sc-grid">
+          <div class="sc-tz"><div class="sc-tz-label">IST — India</div><div class="sc-tz-time">${ist.time}</div><div class="sc-tz-date">${ist.date}</div></div>
+          <div class="sc-tz"><div class="sc-tz-label">ET — New York</div><div class="sc-tz-time">${ny.time}</div><div class="sc-tz-date">${ny.date}</div></div>
+        </div>
+        <div class="sc-countdown ${level}">
+          <div><div class="sc-countdown-label">${label}</div><div class="sc-countdown-value">${countStr}</div></div>
+          <div class="sc-deadline-edit">
+            Flatten by
+            <input type="number" id="sc-hour" min="0" max="23" value="${dl.hour}"> :
+            <input type="number" id="sc-minute" min="0" max="59" value="${String(dl.minute).padStart(2,'0')}">
+            <span>ET (${dlStr12})</span>
+            <button class="btn-ghost btn-small" id="sc-save">Set</button>
+          </div>
+        </div>`;
+      const hourInp = $('#sc-hour'), minInp = $('#sc-minute'), saveBtn = $('#sc-save');
+      if(saveBtn) saveBtn.addEventListener('click', ()=>{
+        const hh = Math.max(0, Math.min(23, parseInt(hourInp.value)||0));
+        const mm = Math.max(0, Math.min(59, parseInt(minInp.value)||0));
+        state.flattenDeadline = { hour:hh, minute:mm };
+        saveState();
+      });
+    }
+
+    // Compact widget (Calculator)
+    const compact = $('#session-clock-calc');
+    if(compact){
+      compact.innerHTML = `
+        <div class="sc-compact">
+          <div class="sc-compact-clocks">
+            <span>IST <b>${ist.time}</b></span>
+            <span>ET <b>${ny.time}</b></span>
+          </div>
+          <div class="sc-compact-count ${level}">${isTomorrow ? 'Next session in ' : 'Flatten in '}${countStr}</div>
+        </div>`;
+    }
   }
 
   /* ============ INIT ============ */
